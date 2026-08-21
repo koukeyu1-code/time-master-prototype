@@ -1,0 +1,119 @@
+/* ============================================================
+   TripsPage · 差旅多日规划（页面私有样式，类名前缀 tr-）
+   仅扩展 global.css 令牌与共享类，不重造基础组件
+   ============================================================ */
+
+/* ---------- 行程头卡 ---------- */
+.tr-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.tr-title { font-family: var(--font-head); font-weight: 700; font-size: 16px; }
+.tr-sub { font-size: 12.5px; margin-top: 1px; }
+.tr-head-right { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* ---------- 风险横幅（汇总条 + 时间轴内嵌共用） ---------- */
+.tr-risks { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.tr-risk {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 10px 14px; font-size: 13px; line-height: 1.55;
+  border: 1px solid var(--rule); border-left-width: 3px; border-radius: var(--r-sm);
+  background: var(--surface);
+}
+.tr-risk > svg { flex: none; margin-top: 3px; }
+.tr-risk .tag { margin-top: 1px; flex: none; }
+.tr-risk.danger { border-left-color: var(--danger); background: rgba(220, 38, 38, 0.05); }
+.tr-risk.danger > svg { color: var(--danger); }
+.tr-risk.warning { border-left-color: var(--warning); background: rgba(217, 119, 6, 0.06); }
+.tr-risk.warning > svg { color: var(--warning); }
+.tr-risk-date { font-size: 12px; color: var(--muted); margin-top: 2px; flex: none; }
+.tr-risk-text { flex: 1; }
+
+/* ---------- 天分片 Tabs ---------- */
+.tr-tabs { display: flex; gap: 10px; margin-top: 18px; }
+.tr-tab {
+  flex: 1; display: flex; flex-direction: column; gap: 3px;
+  padding: 10px 14px; text-align: left; color: var(--ink);
+  border: 1px solid var(--rule); border-radius: 10px;
+  background: var(--surface);
+  transition: all 150ms ease;
+}
+.tr-tab:hover { border-color: rgba(37, 99, 235, 0.4); }
+.tr-tab.active {
+  background: var(--accent); border-color: var(--accent); color: #fff;
+  box-shadow: 0 6px 14px rgba(37, 99, 235, 0.22);
+}
+.tr-tab-top { display: flex; align-items: baseline; gap: 8px; }
+.tr-tab-date { font-size: 14px; }
+.tr-tab-week { font-size: 12px; color: var(--muted); }
+.tr-tab-city { font-size: 11.5px; color: var(--faint); }
+.tr-tab.active .tr-tab-week, .tr-tab.active .tr-tab-city { color: rgba(255, 255, 255, 0.8); }
+
+/* ---------- 时间轴 ---------- */
+.tr-timeline {
+  position: relative; margin-top: 16px; padding-left: 24px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.tr-timeline::before {
+  content: ''; position: absolute; left: 6px; top: 12px; bottom: 12px;
+  width: 2px; border-radius: 2px; background: var(--rule);
+}
+.tr-tl-item { position: relative; }
+.tr-dot {
+  position: absolute; left: -22px; top: 20px;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #fff; border: 2px solid var(--accent);
+}
+.tr-k-rail .tr-dot { border-color: var(--mode-rail); }
+.tr-k-event .tr-dot { border-color: var(--faint); }
+.tr-lv-danger .tr-dot { border-color: var(--danger); }
+.tr-lv-warning .tr-dot { border-color: var(--warning); }
+
+/* ---------- rail 城际段大卡 ---------- */
+.tr-rail-card { border-left: 4px solid var(--mode-rail); }
+.tr-rail-main { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.tr-train { font-size: 18px; }
+.tr-route { font-size: 14.5px; }
+.tr-rail-time { margin-left: auto; font-size: 13px; }
+.tr-conn { display: flex; align-items: flex-start; gap: 6px; font-size: 12.5px; margin-top: 8px; }
+.tr-conn svg { flex: none; margin-top: 3px; color: var(--mode-rail); }
+
+/* ---------- anchor 住宿锚点卡 ---------- */
+.tr-anchor-card { background: rgba(37, 99, 235, 0.05); border-color: rgba(37, 99, 235, 0.18); }
+.tr-anchor-head { display: flex; align-items: center; gap: 10px; }
+.tr-anchor-ic {
+  width: 28px; height: 28px; border-radius: 8px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(37, 99, 235, 0.12); color: var(--accent);
+}
+.tr-anchor-head b { font-size: 14px; }
+.tr-anchor-time { margin-left: auto; font-size: 12.5px; color: var(--muted); }
+.tr-anchor-note { margin-top: 6px; font-size: 12.5px; }
+
+/* ---------- event 普通日程卡 ---------- */
+.tr-ev-head { display: flex; align-items: baseline; gap: 10px; }
+.tr-ev-time { font-size: 12.5px; color: var(--muted); flex: none; }
+.tr-ev-title { font-size: 14px; font-weight: 700; }
+.tr-ev-line { display: flex; align-items: center; gap: 6px; font-size: 12.5px; margin-top: 6px; }
+.tr-ev-line > svg { color: var(--faint); flex: none; }
+.tr-commute .mode-badge { width: 20px; height: 20px; border-radius: 6px; }
+
+/* ---------- 模块说明卡 ---------- */
+.tr-about { margin-top: 22px; }
+.tr-feats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 12px; }
+.tr-feat {
+  padding: 12px 14px;
+  border: 1px solid var(--rule); border-radius: var(--r-sm);
+  background: rgba(244, 247, 251, 0.5);
+}
+.tr-feat-ic {
+  width: 30px; height: 30px; border-radius: 8px; margin-bottom: 8px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(37, 99, 235, 0.1); color: var(--accent);
+}
+.tr-feat h4 { font-family: var(--font-head); font-size: 13.5px; font-weight: 700; margin-bottom: 4px; }
+.tr-feat p { font-size: 12.5px; }
+
+/* ---------- 响应式 ---------- */
+@media (max-width: 900px) {
+  .tr-feats { grid-template-columns: 1fr; }
+  .tr-tabs { flex-direction: column; }
+  .tr-head-right { margin-left: 0; }
+}

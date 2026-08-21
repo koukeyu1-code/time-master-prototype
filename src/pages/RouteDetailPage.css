@@ -1,0 +1,92 @@
+/* ============================================================
+   RouteDetailPage 专属样式（类名前缀 rd-，仅扩展 global.css 契约层）
+   ============================================================ */
+
+/* 返回链接 */
+.rd-back {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; color: var(--muted); margin-bottom: 10px;
+}
+.rd-back:hover { color: var(--accent); }
+
+/* 顶部标题行 */
+.rd-head { display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
+.rd-title { font-family: var(--font-head); font-weight: 700; font-size: 20px; }
+.rd-sub { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.rd-head-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* ---------- 多因子评分 ---------- */
+.rd-score-wrap { margin-bottom: 10px; }
+.rd-score-wrap:last-child { margin-bottom: 0; }
+.rd-score-row {
+  display: flex; align-items: center; gap: 16px;
+  padding: 13px 14px;
+  border: 1px solid var(--rule); border-radius: var(--r-md);
+  background: var(--surface-solid);
+}
+.rd-score-row.best { border: 1.5px solid var(--accent); }
+.rd-score-main { width: 168px; flex: none; display: flex; align-items: center; gap: 10px; }
+.rd-score-factors {
+  flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px;
+}
+.rd-factor { display: flex; align-items: center; gap: 8px; }
+.rd-factor .fl { width: 26px; flex: none; font-size: 11px; color: var(--muted); }
+.rd-factor .bar {
+  flex: 1; height: 3px; border-radius: 2px;
+  background: #e4ebf5; overflow: hidden;
+}
+.rd-factor .bar i {
+  display: block; height: 100%; border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+}
+.rd-score-total { width: 86px; flex: none; text-align: right; }
+.rd-score-total .num { font-family: var(--font-head); font-weight: 700; font-size: 20px; line-height: 1.2; }
+.rd-penalty {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 12px; color: var(--warning); margin: 6px 0 0 54px;
+}
+@media (max-width: 900px) {
+  .rd-score-row { flex-wrap: wrap; }
+  .rd-score-main { width: 100%; }
+  .rd-score-total { width: auto; margin-left: auto; }
+}
+
+/* ---------- 换乘步骤 stepper ---------- */
+.rd-steps { display: flex; flex-direction: column; }
+.rd-step { display: flex; align-items: center; gap: 12px; position: relative; padding-bottom: 16px; }
+.rd-step:last-child { padding-bottom: 0; }
+.rd-step:not(:last-child)::before {
+  content: ''; position: absolute; left: 16px; top: 36px; bottom: 0;
+  width: 2px; background: var(--rule);
+}
+.rd-step-ic {
+  width: 34px; height: 34px; border-radius: 10px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(13, 148, 136, 0.1); color: var(--accent2);
+}
+.rd-step-min { margin-left: auto; flex: none; font-size: 12px; color: var(--muted); }
+
+/* ---------- 冲突预警 ---------- */
+.rd-alert { border: 1.5px solid var(--danger); }
+.rd-alert-head {
+  display: flex; align-items: center; gap: 6px;
+  color: var(--danger); font-weight: 700; font-size: 14px;
+}
+.rd-alert-msg { font-size: 13px; color: var(--muted); margin: 8px 0 12px; }
+.rd-sugs { list-style: none; display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.rd-sugs li { display: flex; gap: 8px; font-size: 13px; }
+.rd-sug-no {
+  flex: none; width: 18px; height: 18px; border-radius: 50%; margin-top: 2px;
+  background: rgba(220, 38, 38, 0.1); color: var(--danger);
+  font-size: 11px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* ---------- 推荐理由 ---------- */
+.rd-why-item { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; font-size: 13px; }
+.rd-why-item + .rd-why-item { border-top: 1px solid var(--rule); }
+.rd-why-ic {
+  flex: none; width: 30px; height: 30px; border-radius: 8px;
+  background: rgba(37, 99, 235, 0.08); color: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+}

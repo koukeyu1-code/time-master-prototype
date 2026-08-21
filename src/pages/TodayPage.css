@@ -1,0 +1,128 @@
+/* ============================================================
+   TodayPage 专属样式（类名前缀 today-，仅扩展 global.css 契约层）
+   ============================================================ */
+
+/* 待补全横幅 */
+.today-banner {
+  display: flex; align-items: center; gap: 12px;
+  margin-top: 16px; padding: 13px 18px;
+  background: var(--surface); backdrop-filter: blur(10px);
+  border: 1px solid var(--rule); border-left: 4px solid var(--warning);
+  border-radius: var(--r-md); box-shadow: var(--shadow-sm);
+}
+.today-banner-ic {
+  width: 34px; height: 34px; border-radius: 10px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(217, 119, 6, 0.1); color: var(--warning);
+}
+
+/* 主区双栏 */
+.today-grid {
+  display: grid; grid-template-columns: 1.08fr 1fr; gap: 16px;
+  margin-top: 16px; align-items: start;
+}
+.today-side { display: flex; flex-direction: column; gap: 16px; }
+@media (max-width: 1000px) {
+  .today-grid { grid-template-columns: 1fr; }
+}
+
+/* ---------- 时间轴 ---------- */
+.today-timeline { position: relative; padding-left: 26px; margin-top: 14px; }
+.today-timeline::before {
+  content: ''; position: absolute; left: 9px; top: 10px; bottom: 10px;
+  width: 2px; background: var(--rule);
+}
+.today-tl-item { position: relative; margin-bottom: 12px; }
+.today-tl-item:last-child { margin-bottom: 0; }
+.today-dot {
+  position: absolute; left: -22px; top: 20px; z-index: 1;
+  width: 10px; height: 10px; border-radius: 50%;
+}
+.today-dot-event { background: var(--accent); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14); }
+.today-dot-leg { background: #fff; border: 2px solid var(--accent); }
+.today-dot-alert { background: var(--danger); box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.14); }
+.today-dot-pending { background: #fff; border: 2px solid #b6c3d6; }
+.today-dot-home { background: var(--accent2); box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.14); }
+
+/* 事件锚点卡 */
+.today-anchor { padding: 12px 16px; }
+.today-anchor-time { font-size: 12px; color: var(--accent); font-weight: 600; }
+.today-anchor-title { font-family: var(--font-head); font-weight: 700; font-size: 14.5px; margin-top: 2px; }
+.today-anchor-loc {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 12.5px; color: var(--muted); margin-top: 2px;
+}
+
+/* 起点 / 终点卡 */
+.today-endpoint {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px; font-size: 13.5px; font-weight: 600; color: var(--muted);
+  background: rgba(255, 255, 255, 0.6);
+}
+
+/* 通勤卡 */
+.today-leg {
+  position: relative; cursor: pointer;
+  transition: box-shadow 150ms ease, transform 150ms ease, border-color 150ms ease;
+}
+.today-leg:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.today-leg.selected { border-color: var(--accent); box-shadow: var(--shadow-md); }
+.today-leg-chev { position: absolute; top: 12px; right: 12px; color: var(--faint); }
+.today-leg-head { display: flex; align-items: center; gap: 12px; padding-right: 20px; }
+.today-leg-title { font-family: var(--font-head); font-weight: 700; font-size: 14px; }
+.today-leg-time { margin-top: 8px; font-size: 12px; color: var(--muted); }
+.today-leg-alert { border: 1.5px solid var(--danger); }
+.today-leg-pending {
+  border: 1.5px dashed var(--rule); box-shadow: none;
+  background: rgba(244, 247, 251, 0.55);
+}
+
+/* 冲突预警块（通勤卡内） */
+.today-alert { margin-top: 12px; border-top: 1px solid rgba(220, 38, 38, 0.18); padding-top: 10px; }
+.today-alert-head {
+  display: flex; align-items: center; gap: 6px;
+  color: var(--danger); font-weight: 700; font-size: 13.5px;
+}
+.today-alert-msg { font-size: 12.5px; color: var(--muted); margin: 6px 0 10px; }
+.today-alert-sugs {
+  list-style: none; display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px;
+}
+.today-alert-sugs li { display: flex; gap: 8px; font-size: 12.5px; }
+.today-sug-no {
+  flex: none; width: 18px; height: 18px; border-radius: 50%; margin-top: 2px;
+  background: rgba(220, 38, 38, 0.1); color: var(--danger);
+  font-size: 11px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* ---------- 模拟地图 ---------- */
+.today-map { margin-top: 12px; }
+.today-map svg { width: 100%; height: auto; display: block; border-radius: var(--r-sm); }
+.today-legend {
+  display: flex; flex-wrap: wrap; gap: 18px;
+  margin-top: 10px; font-size: 12px; color: var(--muted);
+}
+.today-legend .item { display: flex; align-items: center; gap: 6px; }
+.today-legend .sw { width: 24px; height: 0; border-top: 3px solid var(--accent); border-radius: 2px; }
+.today-legend .sw.alert { border-top-color: var(--danger); border-top-style: dashed; }
+.today-legend .sw.pending { border-top-color: #b6c3d6; border-top-style: dashed; }
+
+/* ---------- 飞书 Bot 卡片预览 ---------- */
+.today-bot { overflow: hidden; }
+.today-bot-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px; color: #fff; font-size: 13px; font-weight: 600;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+}
+.today-bot-body { padding: 14px 16px; }
+.today-bot-title { font-weight: 700; font-size: 14.5px; }
+.today-bot-sum { font-size: 12.5px; color: var(--muted); margin-top: 4px; }
+.today-bot-weather {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 12px; color: var(--faint); margin-top: 6px;
+}
+.today-bot-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  border-top: 1px solid var(--rule); padding: 10px 16px;
+  font-size: 11.5px; color: var(--faint);
+}

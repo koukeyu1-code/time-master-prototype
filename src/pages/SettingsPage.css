@@ -1,0 +1,65 @@
+/* SettingsPage 专属样式（前缀 st-） */
+
+/* 载具档案 */
+.st-vehicle { display: flex; align-items: center; gap: 12px; padding: 12px 0; }
+.st-vehicle-info { flex: 1; min-width: 0; }
+.st-vehicle-info .muted { font-size: 12.5px; }
+.st-sub {
+  margin: 0 0 10px 46px; padding-left: 14px;
+  border-left: 2px solid var(--rule);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.st-month { width: 90px; }
+
+/* 决策权重滑块 */
+.st-slider-row { display: flex; align-items: center; gap: 14px; padding: 9px 0; }
+.st-slider-label {
+  display: inline-flex; align-items: center; gap: 7px;
+  width: 104px; flex: none; font-weight: 600; font-size: 13.5px;
+}
+.st-slider-label svg { color: var(--accent); }
+.st-slider-val { width: 32px; text-align: right; color: var(--muted); flex: none; }
+
+/* 缓冲列表 */
+.st-buffer-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+.st-buffer-row .mono { margin-left: auto; color: var(--muted); }
+
+/* 通知分层 */
+.st-notify-row { display: flex; align-items: center; gap: 12px; padding: 11px 0; }
+.st-notify-row + .st-notify-row { border-top: 1px solid var(--rule); }
+.st-ic {
+  width: 34px; height: 34px; border-radius: 10px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(37, 99, 235, 0.08); color: var(--accent);
+}
+.st-ic.warn { background: rgba(217, 119, 6, 0.1); color: var(--warning); }
+.st-ic.gray { background: rgba(91, 107, 132, 0.1); color: var(--muted); }
+.st-notify-info { flex: 1; min-width: 0; }
+.st-notify-info .muted { font-size: 12.5px; }
+
+/* 加急额度 */
+.st-quota { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--rule); }
+.st-quota-bar {
+  height: 6px; border-radius: 999px; overflow: hidden;
+  background: #e2eaf4; margin: 10px 0 8px;
+}
+.st-quota-fill {
+  height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+}
+
+/* 日历同步模式 */
+.st-sync-card {
+  border: 1px solid var(--rule); border-radius: var(--r-md);
+  padding: 14px 16px; cursor: pointer;
+  background: var(--surface-solid);
+  display: flex; flex-direction: column; gap: 10px;
+  transition: border-color 150ms ease, background 150ms ease;
+}
+.st-sync-card:hover { border-color: rgba(37, 99, 235, 0.4); }
+.st-sync-card.on { border-color: var(--accent); background: rgba(37, 99, 235, 0.05); }
+.st-interval { width: 110px; }
+
+/* 同步中旋转 */
+@keyframes stSpin { to { transform: rotate(360deg); } }
+.st-spin { animation: stSpin 900ms linear infinite; }

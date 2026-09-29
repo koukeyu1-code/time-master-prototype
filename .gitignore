@@ -3,3 +3,10 @@ dist/
 *.local
 .DS_Store
 dist-single/
+
+# 后端运行时数据（含飞书日程缓存、API 缓存、用户偏好）
+server/.env
+server/store/data/
+# 运行时数据（API cache / events / places / settings / trip 持久化）
+.run-data/
+

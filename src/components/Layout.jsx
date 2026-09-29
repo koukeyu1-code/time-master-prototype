@@ -6,14 +6,14 @@ import { weather, settings } from '../mock/data';
 const NAV = [
   { to: '/', label: '今日路线', Icon: CalendarClock, end: true },
   { to: '/places', label: '地点与别名', Icon: MapPin },
-  { to: '/trips', label: '差旅规划', Icon: Plane },
+  { to: '/trips', label: '摩旅规划', Icon: Plane },
   { to: '/settings', label: '偏好设置', Icon: Settings },
 ];
 
 const TITLES = [
   { match: /^\/route\//, title: '路线详情' },
   { match: /^\/places/, title: '地点与别名' },
-  { match: /^\/trips/, title: '差旅规划' },
+  { match: /^\/trips/, title: '摩旅规划' },
   { match: /^\/settings/, title: '偏好设置' },
   { match: /^\//, title: '今日路线' },
 ];

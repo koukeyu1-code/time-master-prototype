@@ -1,80 +1,108 @@
 /* ============================================================
-   API Stub 层：函数签名对齐设计方案 v0.3 §7 接口设计
-   当前返回 mock；接入真实后端时逐函数替换实现，形状保持不变。
+   API Client 层：调用后端 BFF（默认 http://localhost:8787）
+   函数签名对齐设计方案 v0.3 §7 接口设计
    ============================================================ */
-import { plan, weather, pendingLocations, places, settings, trip, events } from '../mock/data';
+const BASE = import.meta.env.VITE_API_BASE || '/api';
 
-const delay = (ms = 320) => new Promise((r) => setTimeout(r, ms));
+async function call(path, options = {}) {
+  const res = await fetch(`${BASE}${path}`, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options,
+  });
+  let json;
+  try { json = await res.json(); } catch { json = { code: res.status, message: `HTTP ${res.status}` }; }
+  if (!res.ok || (json.code && json.code !== 0)) {
+    throw new Error(json.message || `HTTP ${res.status}`);
+  }
+  return json;
+}
 
 /** GET /api/plan/today —— 今日出行方案（不存在则实时生成） */
 export async function fetchTodayPlan() {
-  await delay();
-  // TODO: replace with fetch('/api/plan/today')
-  return { code: 0, data: { plan, weather, events } };
+  return call('/plan/today');
 }
 
-/** GET /api/plan/today · 取单段通勤详情（legs JSONB 切片） */
+/** GET /api/plan/legs/:legId —— 取单段通勤详情 */
 export async function fetchRouteDetail(legId) {
-  await delay(240);
-  // TODO: replace with fetch(`/api/plan/today`) 后切片，或后端提供 /api/plan/legs/{legId}
-  const leg = plan.legs.find((l) => l.id === legId);
-  return { code: leg ? 0 : 404, data: leg || null };
+  return call(`/plan/legs/${encodeURIComponent(legId)}`);
 }
 
-/** GET /api/events?status=pending —— 地点待补全队列 */
+/** GET /api/events/pending —— 地点待补全队列 */
 export async function fetchPendingLocations() {
-  await delay(260);
-  // TODO: replace with fetch('/api/events?status=pending')
-  return { code: 0, data: pendingLocations };
+  return call('/events/pending');
 }
 
-/** POST /api/events/{id}/location —— 补全日程地点，同时写入别名库 */
+/** POST /api/events/:id/location —— 补全日程地点 */
 export async function completeLocation(eventId, place) {
-  await delay(420);
-  // TODO: replace with fetch(`/api/events/${eventId}/location`, { method: 'POST', body: JSON.stringify(place) })
-  const ev = events.find((e) => e.id === eventId);
-  if (ev) { ev.status = 'ok'; ev.locationRaw = place.alias; }
-  return { code: 0, data: { eventId, place } };
+  return call(`/events/${encodeURIComponent(eventId)}/location`, {
+    method: 'POST',
+    body: JSON.stringify(place),
+  });
 }
 
 /** GET /api/places —— 常去地点别名库 */
 export async function fetchPlaces() {
-  await delay(240);
-  // TODO: replace with fetch('/api/places')
-  return { code: 0, data: places };
+  return call('/places');
 }
 
 /** GET /api/settings —— 读取偏好设置 */
 export async function fetchSettings() {
-  await delay(220);
-  // TODO: replace with fetch('/api/settings')
-  return { code: 0, data: settings };
+  return call('/settings');
 }
 
 /** PUT /api/settings —— 保存偏好设置 */
 export async function saveSettings(patch) {
-  await delay(380);
-  // TODO: replace with fetch('/api/settings', { method: 'PUT', body: JSON.stringify(patch) })
-  return { code: 0, data: { ...settings, ...patch }, savedAt: new Date().toISOString() };
+  return call('/settings', {
+    method: 'PUT',
+    body: JSON.stringify(patch),
+  });
 }
 
-/** GET /api/plan/{date} —— 差旅多日规划按天调用；原型返回整趟行程 */
+/** GET /api/trip/templates —— 可用行程模板列表 */
+export async function fetchTripTemplates() {
+  return call('/trip/templates');
+}
+
+/** POST /api/trip —— 创建行程（如摩托自驾 7 日） */
+export async function buildTrip(payload) {
+  return call('/trip', { method: 'POST', body: JSON.stringify(payload || {}) });
+}
+
+/** GET /api/trip —— 取当前行程 */
 export async function fetchTrip() {
-  await delay(300);
-  // TODO: replace with fetch(`/api/plan/${date}`) 按天分片
-  return { code: 0, data: trip };
+  return call('/trip');
 }
 
-/** POST /api/plan/recalc —— 实时路况重算（对应设计 §5.4 推送前重算能力） */
+/** GET /api/trip/days/:day —— 取单天详情 */
+export async function fetchTripDay(day) {
+  return call(`/trip/days/${encodeURIComponent(day)}`);
+}
+
+/** POST /api/trip/days/:day/recalc —— 重算某一天（路线、天气、风险） */
+export async function recalcTripDay(day) {
+  return call(`/trip/days/${encodeURIComponent(day)}/recalc`, { method: 'POST' });
+}
+
+/** GET /api/trip/days/:day/pois —— 取某日 50km 范围内的候选景点（高德+内置） */
+export async function fetchTripDayPOIs(day, radius) {
+  const q = radius ? `?radius=${radius}` : '';
+  return call(`/trip/days/${encodeURIComponent(day)}/pois${q}`);
+}
+
+/** PUT /api/trip/days/:day/stops —— 覆盖某日 stops 并重算全程 summary */
+export async function updateTripDayStops(day, stops) {
+  return call(`/trip/days/${encodeURIComponent(day)}/stops`, { method: 'PUT', body: JSON.stringify({ stops }) });
+}
+
+/** POST /api/plan/recalc —— 实时路况重算 */
 export async function recalcTraffic(legId) {
-  await delay(600);
-  // TODO: replace with fetch(`/api/plan/recalc`, { method: 'POST', body: JSON.stringify({ legId }) })
-  return { code: 0, data: { legId, trafficDeltaMin: +2, note: '实时路况重算完成：小雨导致均速下降，通勤时长 +2 分钟' } };
+  return call('/plan/recalc', {
+    method: 'POST',
+    body: JSON.stringify({ legId }),
+  });
 }
 
 /** POST /api/sync —— 手动触发全量同步 */
 export async function triggerSync() {
-  await delay(500);
-  // TODO: replace with fetch('/api/sync', { method: 'POST' })
-  return { code: 0, data: { synced: 6, at: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) } };
+  return call('/sync', { method: 'POST' });
 }

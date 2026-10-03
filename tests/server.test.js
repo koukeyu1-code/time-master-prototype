@@ -48,7 +48,7 @@ test('BFF starts with isolated seed data and serves health and local reads', { t
     childProcess.execFile = forbidden;
     syncBuiltinESMExports();
     const listen = http.Server.prototype.listen;
-    http.Server.prototype.listen = function (port, callback) {
+    http.Server.prototype.listen = function (port, host, callback) {
       this.once('listening', () => process.send({ port: this.address().port }));
       return listen.call(this, port, '127.0.0.1', callback);
     };
@@ -56,7 +56,7 @@ test('BFF starts with isolated seed data and serves health and local reads', { t
   `;
   const runnerPath = path.join(dir, 'smoke-runner.mjs');
   await writeFile(runnerPath, runner);
-  const env = { NODE_ENV: 'test' };
+  const env = { NODE_ENV: 'test', AUTH_DISABLED: 'true' };
   for (const key of ['PATH', 'SystemRoot', 'WINDIR', 'TMP', 'TEMP']) {
     if (process.env[key]) env[key] = process.env[key];
   }
@@ -89,4 +89,25 @@ test('BFF starts with isolated seed data and serves health and local reads', { t
   assert.deepEqual(JSON.parse(await readFile(path.join(dataDir, 'events.json'), 'utf8')), []);
   assert.equal(JSON.parse(await readFile(path.join(dataDir, 'trip.json'), 'utf8')), null);
   assert.ok(JSON.parse(await readFile(path.join(dataDir, 'places.json'), 'utf8')).length > 0);
+});
+
+test('production entry exits before binding or seeding when auth is absent or bypass requested', { timeout: 15000 }, async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'time-master-fail-closed-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const serverDir = path.join(root, 'server');
+  await cp(serverDir, path.join(dir, 'server'), { recursive: true, filter: source => !path.basename(source).startsWith('.env') });
+  await writeFile(path.join(dir, 'package.json'), '{"type":"module"}\n');
+  await symlink(path.join(root, 'node_modules'), path.join(dir, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
+  for (const extra of [{}, { AUTH_DISABLED: 'true' }]) {
+    const child = fork(path.join(dir, 'server/index.js'), [], {
+      cwd: dir, execArgv: [], stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+      env: { NODE_ENV: 'production', PORT: '0', DATA_DIR: path.join(dir, 'data'), ...extra },
+    });
+    let stderr = '';
+    child.stderr.on('data', chunk => stderr += chunk);
+    const exitCode = await new Promise((resolve, reject) => { child.once('exit', resolve); child.once('error', reject); });
+    assert.notEqual(exitCode, 0);
+    assert.match(stderr, /AUTH_PASSWORD_HASH|AUTH_DISABLED/);
+    await assert.rejects(readFile(path.join(dir, 'data/trip.json')), { code: 'ENOENT' });
+  }
 });

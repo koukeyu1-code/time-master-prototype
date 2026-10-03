@@ -114,14 +114,24 @@ export async function syncAgenda(hours = getEnv().AGENDA_HOURS) {
   const end = new Date(now.getTime() + hours * 3600 * 1000);
 
   const raw = await fetchAgenda(start.toISOString(), end.toISOString());
-  const events = raw.map(normalizeEvent);
-  await db.saveEvents(events);
+  const fetched = raw.map(normalizeEvent);
+  const events = await db.updateEvents((current) => {
+    const previous = new Map(current.map((event) => [event.id, event]));
+    return fetched.map((event) => {
+      const local = previous.get(event.id);
+      // Resolve against the latest data while holding the events queue. A slow
+      // refresh must not erase a user's concurrently saved location correction.
+      return local?.placeId
+        ? { ...event, placeId: local.placeId, locationRaw: local.locationRaw, status: local.status }
+        : event;
+    });
+  });
 
-  // 同步后写入 settings.sync.lastSyncAt
-  const settings = await db.getSettings();
-  settings.sync = settings.sync || {};
-  settings.sync.lastSyncAt = new Date().toTimeString().slice(0, 5);
-  await db.saveSettings(settings);
+  // 同步后在同一临界区合并设置，保留并发偏好更改
+  await db.updateSettings((settings) => ({
+    ...settings,
+    sync: { ...settings.sync, lastSyncAt: new Date().toTimeString().slice(0, 5) },
+  }));
 
   return events;
 }

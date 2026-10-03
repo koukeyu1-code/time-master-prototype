@@ -4,14 +4,14 @@
 import { db } from '../store/db.js';
 import { planDriving } from './amap.js';
 import { getWeather, poiSearch } from './amap.js';
-import { CLASSIC_7DAY, RELAXED_10DAY, XN2DH_5DAY, POIS, getPoi, registerDynamicPoi } from '../data/qingganPois.mjs';
+import { CLASSIC_7DAY, RELAXED_10DAY, XN2DH_5DAY, POIS } from '../data/qingganPois.mjs';
 import { placeAround } from './amap.js';
 import { searchCtripNearby } from '../data/ctripProvider.mjs';
 
 /* 根据 preset key 返回模板；默认宽松 10 日（摩托推荐节奏） */
 const PRESET_MAP = { classic7: CLASSIC_7DAY, relaxed10: RELAXED_10DAY, xining2dunhuang: XN2DH_5DAY };
 export function resolveTemplate(preset) {
-  return PRESET_MAP[preset] || RELAXED_10DAY;
+  return Object.hasOwn(PRESET_MAP, preset) ? PRESET_MAP[preset] : RELAXED_10DAY;
 }
 /* 宽松版预设：疲劳阈值稍微提高（允许单日 500km 再告警） */
 const THRESHOLDS_FOR = (preset) => {
@@ -124,34 +124,144 @@ function altitudeRisk(altM) {
  * @param {string} [opts.preset='classic7'] - 模板名称（目前仅 classic7）
  * @param {object} [opts.bikeProfile] - 自定义摩托车参数（油耗L/100km、油箱L、etc）
  */
-/* 按 trip 解析某 day 的 stops key 列表：customStops 覆盖 > template 原始 stops */
+/* Only the built-in catalog is shared. Selected external POIs belong to a trip,
+   never a process-global registration that disappears after a restart. */
+const BUILTIN_POIS = new Map(Object.entries(POIS).map(([key, poi]) => [key, Object.freeze({ ...poi })]));
+const RESERVED_KEYS = new Set([...Object.getOwnPropertyNames(Object.prototype), 'prototype']);
+const POI_FIELDS = new Set([
+  'key', 'name', 'lng', 'lat', 'type', 'altitude', 'stayMin', 'adcode', 'note',
+  'source', 'address', 'rating', 'photos', 'alias', 'subtype', 'ticketCost',
+  'tel', 'distanceM', 'distanceKm', 'price', 'ticketType', 'inStops',
+]);
+const STRING_FIELDS = ['adcode', 'note', 'source', 'address', 'alias', 'subtype', 'tel', 'ticketType'];
+
+function validatePoiKey(key) {
+  if (typeof key !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9:._-]{0,199}$/.test(key) || RESERVED_KEYS.has(key)) {
+    throw new Error('POI key 无效');
+  }
+  return key;
+}
+
+function validatePoiObject(poi) {
+  if (!poi || typeof poi !== 'object' || Array.isArray(poi) ||
+      ![Object.prototype, null].includes(Object.getPrototypeOf(poi))) {
+    throw new Error('POI 必须是普通对象');
+  }
+  for (const field of Reflect.ownKeys(poi)) {
+    const descriptor = Object.getOwnPropertyDescriptor(poi, field);
+    if (!POI_FIELDS.has(field) || !Object.hasOwn(descriptor, 'value')) {
+      throw new Error('POI 属性无效');
+    }
+  }
+  validatePoiKey(poi.key);
+}
+
+function normalizeCustomPoi(poi) {
+  validatePoiObject(poi);
+  if (BUILTIN_POIS.has(poi.key)) throw new Error(`不能覆盖内置 POI: ${poi.key}`);
+  if (typeof poi.name !== 'string' || !poi.name.trim() || poi.name.length > 300) throw new Error('POI name 无效');
+  if (!Number.isFinite(poi.lng) || Math.abs(poi.lng) > 180 ||
+      !Number.isFinite(poi.lat) || Math.abs(poi.lat) > 90) throw new Error('POI 经纬度无效');
+  if (poi.type !== undefined && !['scenic', 'town', 'city'].includes(poi.type)) throw new Error('POI type 无效');
+  for (const field of STRING_FIELDS) {
+    if (poi[field] !== undefined && (typeof poi[field] !== 'string' || poi[field].length > 10000)) {
+      throw new Error(`POI ${field} 无效`);
+    }
+  }
+  for (const field of ['altitude', 'stayMin', 'rating', 'ticketCost', 'distanceM', 'distanceKm', 'price']) {
+    if (poi[field] !== undefined && (!Number.isFinite(poi[field]) || (field !== 'altitude' && poi[field] < 0))) {
+      throw new Error(`POI ${field} 无效`);
+    }
+  }
+  if (poi.photos !== undefined && (!Array.isArray(poi.photos) || poi.photos.length > 100 ||
+      poi.photos.some(photo => typeof photo !== 'string' || photo.length > 4000))) throw new Error('POI photos 无效');
+  if (poi.inStops !== undefined && typeof poi.inStops !== 'boolean') throw new Error('POI inStops 无效');
+  return {
+    ...poi, name: poi.name.trim(), type: poi.type ?? 'scenic',
+    altitude: poi.altitude ?? 0, stayMin: poi.stayMin ?? 120,
+    adcode: poi.adcode ?? '', note: poi.note ?? poi.address ?? '', photos: [...(poi.photos ?? [])],
+  };
+}
+
+function createTripPoiResolver(trip) {
+  const custom = new Map();
+  if (trip?.customPois !== undefined) {
+    const snapshots = trip.customPois;
+    if (!snapshots || typeof snapshots !== 'object' || Array.isArray(snapshots) ||
+        ![Object.prototype, null].includes(Object.getPrototypeOf(snapshots))) throw new Error('customPois 无效');
+    for (const [key, poi] of Object.entries(snapshots)) {
+      validatePoiKey(key);
+      if (poi?.key !== key) throw new Error('customPois key 不匹配');
+      custom.set(key, normalizeCustomPoi(poi));
+    }
+  }
+  // Older JSON already embeds POI snapshots in its saved route. Recover these
+  // lazily; no migration and no dependence on a warmed-up nearby-search cache.
+  for (const day of trip?.days || []) {
+    const saved = [day.startCity, day.endCity,
+      ...(day.stops || []).map(stop => stop.poi),
+      ...(day.legs || []).flatMap(leg => [leg.from, leg.to])];
+    for (const poi of saved) {
+      if (!poi || BUILTIN_POIS.has(poi.key) || custom.has(poi.key)) continue;
+      const normalized = normalizeCustomPoi(poi);
+      custom.set(normalized.key, normalized);
+    }
+  }
+  return {
+    resolve(stop) {
+      if (typeof stop !== 'string') validatePoiObject(stop);
+      const key = validatePoiKey(typeof stop === 'string' ? stop : stop.key);
+      if (typeof stop !== 'string') {
+        const builtin = BUILTIN_POIS.get(key);
+        if (builtin) {
+          for (const field of ['name', 'lng', 'lat', 'type', 'altitude', 'stayMin', 'adcode']) {
+            if (stop[field] !== undefined && stop[field] !== builtin[field]) throw new Error(`不能覆盖内置 POI: ${key}`);
+          }
+        } else {
+          custom.set(key, normalizeCustomPoi(stop));
+        }
+      }
+      const poi = BUILTIN_POIS.get(key) || custom.get(key);
+      if (!poi) throw new Error(`无法解析 POI: ${key}；请重新选择并提交完整景点信息`);
+      return poi;
+    },
+    snapshots() { return Object.fromEntries(custom); },
+  };
+}
+
+/* Preserve saved topology, including older trips that have no customStops map. */
 function resolveStopsForDay(trip, dayNumber) {
-  const preset = trip.preset || 'relaxed10';
-  const template = resolveTemplate(preset);
-  const tpl = template[Number(dayNumber) - 1];
-  const custom = trip.customStops && trip.customStops[String(dayNumber)];
-  if (Array.isArray(custom) && custom.length >= 2) return custom;
+  const key = String(dayNumber);
+  if (trip.customStops && Object.hasOwn(trip.customStops, key)) {
+    const custom = trip.customStops[key];
+    if (!Array.isArray(custom) || custom.length < 2) throw new Error('stops 需要至少 2 个节点（住宿+目的）');
+    return custom;
+  }
+  const day = trip.days?.find(day => day.day === Number(dayNumber));
+  if (day?.legs?.length) {
+    const keys = [day.legs[0].from?.key];
+    for (const leg of day.legs) {
+      if (leg.from?.key !== keys[keys.length - 1]) throw new Error('已保存行程的路线不连续');
+      keys.push(leg.to?.key);
+    }
+    return keys;
+  }
+  const savedStops = day?.stops?.filter(stop => stop.poi).map(stop => stop.poi.key);
+  if (savedStops?.length >= 2) return savedStops;
+  const tpl = resolveTemplate(trip.preset || 'relaxed10')[Number(dayNumber) - 1];
   return tpl ? [...tpl.stops] : [];
 }
 
-/* 按 stopsKey 数组（如 ['xining','kumbum','qinghaihu_erlangjian'] 或 动态 amap:xxx）重新计算某 day；
-   stops 也支持对象 {key,name,lng,lat,...}，这样新 POI 可以直接从前端传过来自动注册。 */
-export async function buildOneDay(stopsArr, { preset, dayNumber, date }) {
+/* Resolve every stop before making API calls. An unresolved stop is an error,
+   never a reason to silently remove part of the itinerary. */
+export async function buildOneDay(stopsArr, { preset, dayNumber, date, poiResolver = createTripPoiResolver() }) {
+  if (!Array.isArray(stopsArr) || stopsArr.length < 2) throw new Error('stops 需要至少 2 个节点（住宿+目的）');
   const TH = THRESHOLDS_FOR(preset);
-  /* 先把传入 stops 规范化：如果是对象则动态登记，最后剩下 key 数组 */
-  const keys = stopsArr.map((s) => {
-    if (typeof s === 'string') return s;
-    if (s && typeof s === 'object') {
-      if (!s.key) return null;
-      if (!getPoi(s.key)) registerDynamicPoi({ ...s });
-      return s.key;
-    }
-    return null;
-  }).filter(Boolean);
+  const pois = stopsArr.map(stop => poiResolver.resolve(stop));
 
   const today = new Date(date + 'T00:00:00');
-  const startCity = getPoi(keys[0]);
-  const endCity = getPoi(keys[keys.length - 1]);
+  const startCity = pois[0];
+  const endCity = pois[pois.length - 1];
   const tpl = resolveTemplate(preset)[Number(dayNumber) - 1] || {};
   const dayObj = {
     day: Number(dayNumber),
@@ -169,12 +279,11 @@ export async function buildOneDay(stopsArr, { preset, dayNumber, date }) {
     weather: null,
   };
 
-  for (let j = 0; j < keys.length - 1; j++) {
-    const from = getPoi(keys[j]);
-    const to = getPoi(keys[j + 1]);
-    if (!from || !to) continue;
+  for (let j = 0; j < pois.length - 1; j++) {
+    const from = pois[j];
+    const to = pois[j + 1];
     if (from.type === 'scenic') {
-      const stay = from.stayMin || 120;
+      const stay = from.stayMin ?? 120;
       dayObj.stops.push({ type: 'scenic', poi: from, stayMin: stay, note: from.note || '' });
       dayObj.totalStayMin += stay;
     } else if ((from.type === 'town' || from.type === 'city') && j === 0) {
@@ -193,10 +302,10 @@ export async function buildOneDay(stopsArr, { preset, dayNumber, date }) {
       dayObj.stops.push({ type: 'fuel', afterLeg: j, label: `建议加油（距前站 ${Math.round(leg.distanceKm)}km）`, note: '请在途经城镇搜索中石化/中石油加油站，勿等油表黄灯。' });
     }
   }
-  const lastStop = getPoi(keys[keys.length - 1]);
+  const lastStop = pois[pois.length - 1];
   if (lastStop?.type === 'scenic') {
-    dayObj.stops.push({ type: 'scenic', poi: lastStop, stayMin: lastStop.stayMin || 120, note: lastStop.note || '' });
-    dayObj.totalStayMin += lastStop.stayMin || 120;
+    dayObj.stops.push({ type: 'scenic', poi: lastStop, stayMin: lastStop.stayMin ?? 120, note: lastStop.note || '' });
+    dayObj.totalStayMin += lastStop.stayMin ?? 120;
   } else if (lastStop) {
     dayObj.stops.push({ type: 'anchor', poi: lastStop, label: '抵达住宿' });
   }
@@ -236,22 +345,23 @@ function recalcTripSummary(trip) {
   return trip;
 }
 
-/* 覆盖某个 day 的 stops → 重算该 day → 写回 trip.summary → saveTrip → 返回 trip */
+/* Keep the read, route calculation and replacement in one store transaction. */
 export async function updateDayStops(dayNumber, stopsArr) {
-  const trip = await db.getTrip();
-  if (!trip) throw new Error('行程尚未生成，先 POST /api/trip 创建');
-  const n = Number(dayNumber);
-  if (n < 1 || n > trip.totalDays) throw new Error(`day 越界（1..${trip.totalDays}）`);
-  if (!Array.isArray(stopsArr) || stopsArr.length < 2) throw new Error('stops 需要至少 2 个节点（住宿+目的）');
-  // 先登记 stops 里的动态 POI（对象项）
-  stopsArr.forEach((s) => { if (s && typeof s === 'object' && s.key && !getPoi(s.key)) registerDynamicPoi({ ...s }); });
-  const idx = trip.days.findIndex(d => d.day === n);
-  trip.customStops = { ...(trip.customStops || {}), [String(n)]: stopsArr.map(s => typeof s === 'string' ? s : s.key) };
-  const dateStr = (trip.days[idx] || { date: trip.startDate }).date;
-  trip.days[idx] = await buildOneDay(stopsArr, { preset: trip.preset, dayNumber: n, date: dateStr });
-  recalcTripSummary(trip);
-  await db.saveTrip(trip);
-  return trip;
+  return db.updateTrip(async (existing) => {
+    if (!existing) throw new Error('行程尚未生成，先 POST /api/trip 创建');
+    const trip = structuredClone(existing);
+    const n = Number(dayNumber);
+    const idx = trip.days.findIndex(d => d.day === n);
+    if (!Number.isInteger(n) || n < 1 || n > trip.totalDays || idx < 0) throw new Error(`day 越界（1..${trip.totalDays}）`);
+    const poiResolver = createTripPoiResolver(trip);
+    const day = await buildOneDay(stopsArr, {
+      preset: trip.preset, dayNumber: n, date: trip.days[idx].date, poiResolver,
+    });
+    trip.customStops = { ...(trip.customStops || {}), [String(n)]: stopsArr.map(stop => typeof stop === 'string' ? stop : stop.key) };
+    trip.customPois = poiResolver.snapshots();
+    trip.days[idx] = day;
+    return recalcTripSummary(trip);
+  });
 }
 
 /* 返回某日附近的推荐景点：(1) 内置 POIS 同 adcode 区域的景区 (2) 高德 placeAround */
@@ -260,7 +370,8 @@ export async function getNearbyAttractions(dayNumber, radius = 50000) {
   if (!trip) throw new Error('行程尚未生成');
   const n = Number(dayNumber);
   const keys = resolveStopsForDay(trip, n);
-  const pois = keys.map(getPoi).filter(Boolean);
+  const poiResolver = createTripPoiResolver(trip);
+  const pois = keys.map(key => poiResolver.resolve(key));
   if (!pois.length) return [];
 
   // 计算所有 stops 的中心点（加权：起点终点各 x2）
@@ -291,20 +402,13 @@ export async function getNearbyAttractions(dayNumber, radius = 50000) {
     ctrip.push(...allC.flat());
   } catch (e) { /* ignore */ }
 
-  // 动态登记高德/携程结果，前端勾选时 key 可直接用
-  around.forEach((a) => { if (!getPoi(a.key)) registerDynamicPoi({ ...a, note: a.address, altitude: 0 }); });
-  ctrip.forEach((a) => {
-    if (!getPoi(a.key)) registerDynamicPoi({
-      key: a.key, name: a.name, lng: a.lng, lat: a.lat, altitude: 0,
-      stayMin: 120, note: a.note || a.address, type: 'scenic',
-      address: a.address, rating: a.rating, photos: a.photos, source: a.source,
-    });
-  });
+  // Nearby search is read-only. The client submits the full selected POI;
+  // updateDayStops validates and persists it with this trip.
 
   // (1) 内置 POIS：所有 type=scenic 且到中心距离 < radius*1.2 的项
   const kmPerLng = Math.cos(avgLat * Math.PI / 180) * 111;
   const kmPerLat = 111;
-  const within = Object.values(POIS).filter(p => p.type === 'scenic');
+  const within = [...BUILTIN_POIS.values()].filter(p => p.type === 'scenic');
   const builtin = within.map((p) => {
     const dx = (p.lng - avgLng) * kmPerLng, dy = (p.lat - avgLat) * kmPerLat;
     const distanceKm = Math.sqrt(dx * dx + dy * dy);
@@ -358,58 +462,60 @@ export async function getNearbyAttractions(dayNumber, radius = 50000) {
 }
 
 export async function buildTrip(opts = {}) {
-  const preset = opts.preset || 'relaxed10';
-  const startDate = opts.startDate || '2026-09-26'; /* 宽松版默认按用户请求：9月26日 */
-  const template = resolveTemplate(preset);
-  const startD = new Date(startDate + 'T00:00:00');
+  return db.updateTrip(async () => {
+    const preset = opts.preset || 'relaxed10';
+    const startDate = opts.startDate || '2026-09-26'; /* 宽松版默认按用户请求：9月26日 */
+    const template = resolveTemplate(preset);
+    const startD = new Date(startDate + 'T00:00:00');
 
-  /* 1. 按 template.length 逐天调用 buildOneDay */
-  const days = [];
-  for (let i = 0; i < template.length; i++) {
-    const stopsKeys = [...template[i].stops];
-    const dateStr = ymd(addDays(startD, i));
-    const dayObj = await buildOneDay(stopsKeys, { preset, dayNumber: i + 1, date: dateStr });
-    days.push(dayObj);
-  }
+    /* 1. 按 template.length 逐天调用 buildOneDay */
+    const days = [];
+    for (let i = 0; i < template.length; i++) {
+      const stopsKeys = [...template[i].stops];
+      const dateStr = ymd(addDays(startD, i));
+      const dayObj = await buildOneDay(stopsKeys, { preset, dayNumber: i + 1, date: dateStr });
+      days.push(dayObj);
+    }
 
-  /* 3. 汇总统计 */
-  const summary = days.reduce((acc, d) => {
-    acc.totalKm += d.totalKm;
-    acc.totalDriveMin += d.totalDriveMin;
-    acc.totalStayMin += d.totalStayMin;
-    acc.highestAlt = Math.max(acc.highestAlt, d.altitudePeak);
-    return acc;
-  }, { totalKm: 0, totalDriveMin: 0, totalStayMin: 0, highestAlt: 0 });
+    /* 3. 汇总统计 */
+    const summary = days.reduce((acc, d) => {
+      acc.totalKm += d.totalKm;
+      acc.totalDriveMin += d.totalDriveMin;
+      acc.totalStayMin += d.totalStayMin;
+      acc.highestAlt = Math.max(acc.highestAlt, d.altitudePeak);
+      return acc;
+    }, { totalKm: 0, totalDriveMin: 0, totalStayMin: 0, highestAlt: 0 });
 
-  const tripNameByPreset = {
-    classic7: '青甘大环线 · 摩托自驾 7 日',
-    relaxed10: '青甘大环线 · 摩托宽松 10 日（嘉峪关前慢节奏）',
-    xining2dunhuang: '西宁→敦煌 · 摩托单向 5 日（单程）',
-  };
-  const trip = {
-    id: `qinggan_${preset}_${startDate}`,
-    name: tripNameByPreset[preset] || `青甘大环线 · 摩托 ${template.length} 日`,
-    preset,
-    startDate,
-    endDate: ymd(addDays(startD, template.length - 1)),
-    totalDays: template.length,
-    oneway: preset === 'xining2dunhuang',
-    customStops: {}, /* 前端 PUT stops/:day 覆盖会写到这里 */
-    summary: {
-      totalKm: Math.round(summary.totalKm),
-      drivingHours: Math.round(summary.totalDriveMin / 60 * 10) / 10,
-      stayHours: Math.round(summary.totalStayMin / 60 * 10) / 10,
-      highestAlt: summary.highestAlt,
-      averageDailyKm: Math.round(summary.totalKm / template.length),
-    },
-    days,
-    mode: 'motorcycle',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
+    const tripNameByPreset = {
+      classic7: '青甘大环线 · 摩托自驾 7 日',
+      relaxed10: '青甘大环线 · 摩托宽松 10 日（嘉峪关前慢节奏）',
+      xining2dunhuang: '西宁→敦煌 · 摩托单向 5 日（单程）',
+    };
+    const trip = {
+      id: `qinggan_${preset}_${startDate}`,
+      name: Object.hasOwn(tripNameByPreset, preset) ? tripNameByPreset[preset] : `青甘大环线 · 摩托 ${template.length} 日`,
+      preset,
+      startDate,
+      endDate: ymd(addDays(startD, template.length - 1)),
+      totalDays: template.length,
+      oneway: preset === 'xining2dunhuang',
+      customStops: {}, /* 前端 PUT stops/:day 覆盖会写到这里 */
+      customPois: {}, /* 与行程一起持久化的动态景点快照 */
+      summary: {
+        totalKm: Math.round(summary.totalKm),
+        drivingHours: Math.round(summary.totalDriveMin / 60 * 10) / 10,
+        stayHours: Math.round(summary.totalStayMin / 60 * 10) / 10,
+        highestAlt: summary.highestAlt,
+        averageDailyKm: Math.round(summary.totalKm / template.length),
+      },
+      days,
+      mode: 'motorcycle',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
 
-  await db.saveTrip(trip);
-  return trip;
+    return trip;
+  });
 }
 
 /** 取存储中的行程（若无返回 null）*/
@@ -419,20 +525,25 @@ export async function getTrip() {
 
 /** 重算某一天：按当前 stops 覆盖 + weather + 风险。若用户未自定义 stops 则用 template 原值 */
 export async function recalcDay(dayNumber) {
-  const trip = await db.getTrip();
-  if (!trip) return null;
-  const n = Number(dayNumber);
-  const idx = trip.days.findIndex(d => d.day === n);
-  if (idx < 0) return null;
-
-  const stopsArr = resolveStopsForDay(trip, n);
-  if (stopsArr.length < 2) return null;
-  const today = new Date(trip.startDate + 'T00:00:00');
-  today.setDate(today.getDate() + idx);
-  trip.days[idx] = await buildOneDay(stopsArr, { preset: trip.preset, dayNumber: n, date: ymd(today) });
-  recalcTripSummary(trip);
-  await db.saveTrip(trip);
-  return trip;
+  const notFound = new Error('行程或日期未找到');
+  try {
+    return await db.updateTrip(async (existing) => {
+      if (!existing) throw notFound;
+      const trip = structuredClone(existing);
+      const n = Number(dayNumber);
+      const idx = trip.days.findIndex(d => d.day === n);
+      if (!Number.isInteger(n) || idx < 0) throw notFound;
+      const stopsArr = resolveStopsForDay(trip, n);
+      const poiResolver = createTripPoiResolver(trip);
+      const date = trip.days[idx].date || ymd(addDays(new Date(trip.startDate + 'T00:00:00'), idx));
+      trip.days[idx] = await buildOneDay(stopsArr, { preset: trip.preset, dayNumber: n, date, poiResolver });
+      trip.customPois = poiResolver.snapshots();
+      return recalcTripSummary(trip);
+    });
+  } catch (error) {
+    if (error === notFound) return null;
+    throw error;
+  }
 }
 
 /* 沿某条 driving 路线查加油站（仅当有需要时单独调用，当前用阈值规则简化） */

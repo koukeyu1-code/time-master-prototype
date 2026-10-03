@@ -4,11 +4,12 @@
    DELETE /api/places/:id —— 删除地点
    GET /api/places/search?keywords=xxx&city=北京 —— 高德 POI 搜索 */
 import { Router } from 'express';
+import { wrapRouter } from '../lib/asyncRouter.js';
 import { db } from '../store/db.js';
 import { ok, fail, genId } from '../lib/utils.js';
 import { geocode, poiSearch } from '../services/amap.js';
 
-const router = Router();
+const router = wrapRouter(Router());
 
 router.get('/', async (_req, res) => {
   const list = await db.getPlaces();
@@ -48,9 +49,7 @@ router.put('/:id', async (req, res) => {
 });
 
 router.delete('/:id', async (req, res) => {
-  const list = await db.getPlaces();
-  const next = list.filter((p) => p.id !== req.params.id);
-  await db.savePlaces(next);
+  await db.updatePlaces((list) => list.filter((p) => p.id !== req.params.id));
   res.json(ok({ deleted: req.params.id }));
 });
 

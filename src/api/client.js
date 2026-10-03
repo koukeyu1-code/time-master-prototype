@@ -2,17 +2,32 @@
    API Client 层：调用后端 BFF（默认 http://localhost:8787）
    函数签名对齐设计方案 v0.3 §7 接口设计
    ============================================================ */
-const BASE = import.meta.env.VITE_API_BASE || '/api';
+const BASE = '/api'; // Personal access uses same-origin cookies only.
+let csrfToken;
+async function session() {
+  const result = await fetch(`${BASE}/auth/session`, { credentials: 'same-origin', cache: 'no-store' });
+  if (result.status === 401) { window.location.replace('/login'); throw new Error('请先登录'); }
+  if (!result.ok) throw new Error('读取登录状态失败');
+  csrfToken = (await result.json()).data.csrfToken;
+  return csrfToken;
+}
+export async function logout() {
+  await call('/auth/logout', { method: 'POST' });
+  window.location.replace('/login');
+}
 
 async function call(path, options = {}) {
+  const mutating = !['GET', 'HEAD'].includes(options.method || 'GET');
+  if (mutating && csrfToken === undefined) await session();
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
+    ...options, credentials: 'same-origin', cache: 'no-store',
+    headers: { 'Content-Type': 'application/json', ...(mutating && csrfToken ? { 'X-CSRF-Token': csrfToken } : {}), ...options.headers },
   });
+  if (res.status === 401) { window.location.replace('/login'); throw new Error('登录已失效，请重新登录'); }
   let json;
   try { json = await res.json(); } catch { json = { code: res.status, message: `HTTP ${res.status}` }; }
   if (!res.ok || (json.code && json.code !== 0)) {
-    throw new Error(json.message || `HTTP ${res.status}`);
+    throw new Error(json.message || json.error || `HTTP ${res.status}`);
   }
   return json;
 }

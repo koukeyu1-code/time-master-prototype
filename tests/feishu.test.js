@@ -7,7 +7,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import dotenv from 'dotenv';
-import { db } from '../server/store/db.js';
+import { createStore, db } from '../server/store/db.js';
 
 const envKeys = ['LARK_CLI_BIN', 'LARK_PROFILE', 'AGENDA_HOURS'];
 const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
@@ -62,9 +62,8 @@ function assertWindow(hours, now) {
 }
 function mockStore(t) {
   return {
-    events: t.mock.method(db, 'saveEvents', async () => {}),
-    settings: t.mock.method(db, 'getSettings', async () => ({ sync: { mode: 'polling' } })),
-    saveSettings: t.mock.method(db, 'saveSettings', async () => {}),
+    events: t.mock.method(db, 'updateEvents', async (updater) => updater([])),
+    settings: t.mock.method(db, 'updateSettings', async (updater) => updater({ sync: { mode: 'polling' } })),
   };
 }
 
@@ -171,8 +170,8 @@ for (const [label, value, explicitHours, expectedHours] of [
     const result = await syncAgenda(explicitHours);
     assertWindow(expectedHours, now);
     assert.equal(result[0].id, 'event-fixture');
-    assert.deepEqual(store.events.mock.calls[0].arguments, [result]);
-    assert.deepEqual(store.saveSettings.mock.calls[0].arguments, [{ sync: { mode: 'polling', lastSyncAt: new Date(now).toTimeString().slice(0, 5) } }]);
+    assert.deepEqual(await store.events.mock.calls[0].result, result);
+    assert.deepEqual(await store.settings.mock.calls[0].result, { sync: { mode: 'polling', lastSyncAt: new Date(now).toTimeString().slice(0, 5) } });
   });
 }
 
@@ -182,7 +181,6 @@ test('sync does not persist a failed CLI response', async (t) => {
   await assert.rejects(syncAgenda(), /fixture failure/);
   assert.equal(store.events.mock.callCount(), 0);
   assert.equal(store.settings.mock.callCount(), 0);
-  assert.equal(store.saveSettings.mock.callCount(), 0);
 });
 
 test('normalization preserves identity and marks an online meeting', () => {
@@ -211,4 +209,39 @@ test('normalization handles missing optional fields and unresolved locations', (
   assert.equal(visit.type, 'visit');
   assert.equal(visit.status, 'pending');
   assert.equal(visit.placeId, null);
+});
+
+// These tests use only fresh temporary data; the CLI remains mocked above.
+test('a slow agenda refresh preserves a concurrent local location and settings correction', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'time-master-sync-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const store = createStore(dir, { logger: {} });
+  await store.ensureSeed();
+  await store.saveEvents([{ id: 'event-fixture', placeId: null, status: 'pending' }]);
+  t.mock.method(db, 'updateEvents', store.updateEvents);
+  t.mock.method(db, 'updateSettings', store.updateSettings);
+  let release;
+  let announce;
+  const blocked = new Promise((resolve) => { release = resolve; });
+  const started = new Promise((resolve) => { announce = resolve; });
+  execute.mock.mockImplementationOnce(async () => {
+    announce();
+    await blocked;
+    return { stdout: JSON.stringify({ ok: true, data: [{ event_id: 'event-fixture', summary: 'Updated remote title' }] }), stderr: '' };
+  });
+  const syncing = syncAgenda();
+  await started;
+  await store.updateEvents((events) => events.map((event) => ({ ...event, placeId: 'local-place', locationRaw: 'Corrected location', status: 'ok' })));
+  await store.updateSettings((settings) => ({ ...settings, reminderLeadMin: 42, sync: { ...settings.sync, intervalMin: 19 } }));
+  release();
+  const result = await syncing;
+  assert.equal(result[0].title, 'Updated remote title');
+  assert.equal(result[0].placeId, 'local-place');
+  assert.equal(result[0].locationRaw, 'Corrected location');
+  assert.equal(result[0].status, 'ok');
+  assert.deepEqual(await store.getEvents(), result);
+  const settings = await store.getSettings();
+  assert.equal(settings.reminderLeadMin, 42);
+  assert.equal(settings.sync.intervalMin, 19);
+  assert.ok(settings.sync.lastSyncAt);
 });

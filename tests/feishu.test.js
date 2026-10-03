@@ -217,7 +217,8 @@ test('a slow agenda refresh preserves a concurrent local location and settings c
   t.after(() => rm(dir, { recursive: true, force: true }));
   const store = createStore(dir, { logger: {} });
   await store.ensureSeed();
-  await store.saveEvents([{ id: 'event-fixture', placeId: null, status: 'pending' }]);
+  const source = { event_id: 'event-fixture', summary: 'Original remote title', location: { name: 'Source venue' } };
+  await store.saveEvents([normalizeEvent(source)]);
   t.mock.method(db, 'updateEvents', store.updateEvents);
   t.mock.method(db, 'updateSettings', store.updateSettings);
   let release;
@@ -227,7 +228,7 @@ test('a slow agenda refresh preserves a concurrent local location and settings c
   execute.mock.mockImplementationOnce(async () => {
     announce();
     await blocked;
-    return { stdout: JSON.stringify({ ok: true, data: [{ event_id: 'event-fixture', summary: 'Updated remote title' }] }), stderr: '' };
+    return { stdout: JSON.stringify({ ok: true, data: [{ ...source, summary: 'Updated remote title' }] }), stderr: '' };
   });
   const syncing = syncAgenda();
   await started;
@@ -245,3 +246,27 @@ test('a slow agenda refresh preserves a concurrent local location and settings c
   assert.equal(settings.sync.intervalMin, 19);
   assert.ok(settings.sync.lastSyncAt);
 });
+
+for (const [label, sourceChange, missingSource] of [
+  ['a changed physical venue', { location: { name: 'New venue', address: 'New address' } }],
+  ['conversion to an online-only meeting', { location: null, vchat: { meeting_url: 'https://example.invalid/meeting' } }],
+  ['a changed address under the same venue name', { location: { name: 'Source venue', address: 'New address' } }],
+  ['a legacy correction without a saved source baseline', {}, true],
+]) {
+  test(`agenda refresh clears a stale local location after ${label}`, async (t) => {
+    const source = { event_id: 'event-fixture', summary: 'Fixture meeting', location: { name: 'Source venue', address: 'Old address' } };
+    const local = { ...normalizeEvent(source), placeId: 'old-place', locationRaw: 'Locally corrected old venue', status: 'ok' };
+    if (missingSource) delete local.raw;
+    const incoming = { ...source, ...sourceChange, summary: 'Updated remote title' };
+    const expected = normalizeEvent(incoming);
+    stdout = JSON.stringify({ ok: true, data: [incoming] });
+    let saved;
+    t.mock.method(db, 'updateEvents', async (updater) => (saved = await updater([local])));
+    t.mock.method(db, 'updateSettings', async (updater) => updater({ sync: {} }));
+
+    const result = await syncAgenda();
+    assert.deepEqual(result, [expected]);
+    assert.deepEqual(saved, [expected]);
+    assert.equal(result[0].placeId, null);
+  });
+}

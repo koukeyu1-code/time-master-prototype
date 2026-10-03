@@ -7,7 +7,7 @@
    不直接走 OpenAPI：避免在后端维护 app_id/app_secret
    ============================================================ */
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { isDeepStrictEqual, promisify } from 'node:util';
 import { db } from '../store/db.js';
 
 const execFileAsync = promisify(execFile);
@@ -119,9 +119,15 @@ export async function syncAgenda(hours = getEnv().AGENDA_HOURS) {
     const previous = new Map(current.map((event) => [event.id, event]));
     return fetched.map((event) => {
       const local = previous.get(event.id);
+      const source = local?.raw && normalizeEvent(local.raw);
+      const sameSourceLocation = source && source.id != null && source.id === event.id &&
+        isDeepStrictEqual(local.raw.location ?? null, event.raw.location ?? null) &&
+        source.meetingUrl === event.meetingUrl && source.status === event.status;
       // Resolve against the latest data while holding the events queue. A slow
       // refresh must not erase a user's concurrently saved location correction.
-      return local?.placeId
+      // Only reuse it while its saved upstream location/meeting is unchanged;
+      // a moved/online meeting or unknown legacy baseline must resolve afresh.
+      return local?.placeId && sameSourceLocation
         ? { ...event, placeId: local.placeId, locationRaw: local.locationRaw, status: local.status }
         : event;
     });

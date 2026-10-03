@@ -11,17 +11,25 @@ import { promisify } from 'node:util';
 import { db } from '../store/db.js';
 
 const execFileAsync = promisify(execFile);
-const LARK_BIN = process.env.LARK_CLI_BIN || 'lark-cli';
-const LARK_PROFILE = process.env.LARK_PROFILE || '';
-const AGENDA_HOURS = Number(process.env.AGENDA_HOURS || 24);
+
+/* ESM 静态 import 先于入口的 dotenv.config() 执行，配置须在调用时读取。 */
+function getEnv() {
+  return {
+    LARK_BIN: process.env.LARK_CLI_BIN || 'lark-cli',
+    LARK_PROFILE: process.env.LARK_PROFILE || '',
+    AGENDA_HOURS: Number(process.env.AGENDA_HOURS || 24),
+  };
+}
 
 function buildArgs(base) {
+  const { LARK_PROFILE } = getEnv();
   const args = [...base];
   if (LARK_PROFILE) args.push('--profile', LARK_PROFILE);
   return args;
 }
 
 async function runLark(args) {
+  const { LARK_BIN } = getEnv();
   try {
     const { stdout } = await execFileAsync(LARK_BIN, args, {
       maxBuffer: 16 * 1024 * 1024,
@@ -99,7 +107,7 @@ function isoToHm(iso) {
 }
 
 /* ---------- 拉取 + 缓存 ---------- */
-export async function syncAgenda(hours = AGENDA_HOURS) {
+export async function syncAgenda(hours = getEnv().AGENDA_HOURS) {
   const now = new Date();
   const start = new Date(now);
   start.setHours(0, 0, 0, 0);

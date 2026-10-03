@@ -10,7 +10,10 @@
     "start": "node server/index.js",
     "server": "node --watch server/index.js",
     "test": "node --test",
-    "dev:all": "concurrently -n web,api -c cyan,magenta \"npm:dev\" \"npm:server\""
+    "dev:all": "concurrently -n web,api -c cyan,magenta \"npm:dev\" \"npm:server\"",
+    "test:browser": "node scripts/browser-regression.mjs",
+    "auth:hash": "node scripts/hash-password.mjs",
+    "test:http": "node scripts/http-regression.mjs"
   },
   "dependencies": {
     "cors": "^2.8.5",

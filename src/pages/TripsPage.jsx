@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bike, AlertTriangle, BellPlus, Hotel, MapPin, CalendarDays, RefreshCw,
   Mountain, CloudRain, Droplets, Fuel, Clock, Compass, Sparkles,
@@ -281,6 +281,7 @@ export default function TripsPage() {
   const [templates, setTemplates] = useState([]);
   const [nearbyPOIs, setNearbyPOIs] = useState([]);
   const [loadingPOIs, setLoadingPOIs] = useState(false);
+  const mutationBusy = useRef(false);
   const [savingStopKey, setSavingStopKey] = useState(null); /* poi.key 正在保存 */
   const { toasts, push } = useToast();
 
@@ -313,27 +314,22 @@ export default function TripsPage() {
       .catch(e => { if (alive) push('加载景点失败：' + e.message, 'error'); })
       .finally(() => { if (alive) setLoadingPOIs(false); });
     return () => { alive = false; };
-  }, [trip?.id, dayIdx]);
+  }, [trip, dayIdx]);
 
   /* 勾选/取消 POI 到指定 Day 的 stops：插入到终点住宿前（或直接删除） */
   const toggleStop = async (poi, isAdd) => {
-    if (!trip) return;
+    if (!trip || mutationBusy.current) return;
     const d = trip.days[dayIdx] || trip.days[0];
     if (!d) return;
+    mutationBusy.current = true;
     setSavingStopKey(poi.key);
     try {
       const keys = deriveStopKeysFromDay(d);
       let newStops = [...keys];
       if (isAdd) {
-        // 动态 amap:* POI：把完整对象作为 stop 项提交，让后端自动登记
-        if (poi.key.startsWith('amap:')) {
-          if (!newStops.includes(poi.key)) {
-            newStops.splice(Math.max(1, newStops.length - 1), 0, poi);
-          }
-        } else {
-          if (!newStops.includes(poi.key)) {
-            newStops.splice(Math.max(1, newStops.length - 1), 0, poi.key);
-          }
+        // 所有新景点均提交完整快照，重启后不依赖进程内注册表。
+        if (!newStops.includes(poi.key)) {
+          newStops.splice(Math.max(1, newStops.length - 1), 0, poi);
         }
       } else {
         newStops = newStops.filter(k => (typeof k === 'string' ? k !== poi.key : k.key !== poi.key));
@@ -342,15 +338,18 @@ export default function TripsPage() {
       const r = await updateTripDayStops(d.day, newStops);
       setTrip(r.data);
       push(isAdd ? `已加入「${poi.name}」并重新计算路线` : `已移除「${poi.name}」并重新计算路线`);
-      // 刷新 pois 的 inStops 标记（不必重新 fetch，服务端返回的 trip 有最新 stops，本地 nextTick 会触发上面 effect 重拉 pois 时自然刷新）
+      // 勾选状态从已保存的 day 派生；trip 变化也会重新拉取附近候选。
     } catch (e) {
       push('保存失败：' + e.message, 'error');
     } finally {
+      mutationBusy.current = false;
       setSavingStopKey(null);
     }
   };
 
   const onCreate = async () => {
+    if (mutationBusy.current) return;
+    mutationBusy.current = true;
     setBuilding(true);
     try {
       const r = await buildTrip({ startDate, preset });
@@ -360,11 +359,14 @@ export default function TripsPage() {
     } catch (e) {
       push('生成失败：' + e.message, 'error');
     } finally {
+      mutationBusy.current = false;
       setBuilding(false);
     }
   };
 
   const onRecalcDay = async (n) => {
+    if (mutationBusy.current) return;
+    mutationBusy.current = true;
     setRecalcDay(n);
     try {
       const r = await recalcTripDay(n);
@@ -373,12 +375,15 @@ export default function TripsPage() {
     } catch (e) {
       push('重算失败：' + e.message, 'error');
     } finally {
+      mutationBusy.current = false;
       setRecalcDay(null);
     }
   };
 
   /* 行程视图派生数据（注意：必须位于所有 early-return 之前，遵守 Rules of Hooks） */
   const day = trip?.days?.[dayIdx] || trip?.days?.[0] || null;
+  const selectedStopKeys = new Set(deriveStopKeysFromDay(day));
+  const isMutating = building || recalcDay !== null || savingStopKey !== null;
   const alerts = useMemo(() => (day?.alerts || []), [day]);
   const timeline = useMemo(() => buildTimeline(day || {}), [day]);
   const scenicCount = trip ? trip.days.reduce((a, d) => a + (d.stops?.filter(s => s.type === 'scenic').length || 0), 0) : 0;
@@ -437,7 +442,7 @@ export default function TripsPage() {
             <button
               type="button"
               className="btn btn-primary"
-              disabled={building}
+              disabled={isMutating}
               onClick={onCreate}
             >
               {building ? <>
@@ -489,7 +494,7 @@ export default function TripsPage() {
           <span className="tag tag-amber">⛽ 加油 {fuelCount} 次</span>
           <span className="tag tag-red">⚠️ 风险 {alertCount} 条</span>
           <span className="tag tag-outline">最高海拔 {trip.summary.highestAlt} m</span>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={onCreate} disabled={building}>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onCreate} disabled={isMutating}>
             <RefreshCw size={14} className={building ? 'spin' : ''} strokeWidth={1.9} />
             重建行程
           </button>
@@ -560,7 +565,7 @@ export default function TripsPage() {
                       {day.weather.impact && <div className="tr-weather-impact">{day.weather.impact}</div>}
                     </div>
                   )}
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => onRecalcDay(day.day)} disabled={recalcDay === day.day}>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => onRecalcDay(day.day)} disabled={isMutating}>
                     <RefreshCw size={13} className={recalcDay === day.day ? 'spin' : ''} strokeWidth={1.9} />
                     重算当天
                   </button>
@@ -632,7 +637,7 @@ export default function TripsPage() {
                           <button
                             type="button"
                             className="btn btn-ghost btn-xs"
-                            disabled={savingStopKey === poi.key}
+                            disabled={isMutating}
                             onClick={() => toggleStop({ key: poi.key, name: poi.name }, false)}
                           >
                             ✕
@@ -649,14 +654,13 @@ export default function TripsPage() {
                 {loadingPOIs && <Skeleton lines={4} />}
                 {!loadingPOIs && nearbyPOIs.length === 0 && <div className="muted">暂无周边景点</div>}
                 {!loadingPOIs && nearbyPOIs.map(p => {
-                  const inStops = p.inStops;
-                  const busy = savingStopKey === p.key;
+                  const inStops = selectedStopKeys.has(p.key);
                   return (
                     <label key={p.key} className={`tr-poi-card ${inStops ? 'in-stops' : ''}`}>
                       <input
                         type="checkbox"
                         checked={!!inStops}
-                        disabled={busy}
+                        disabled={isMutating}
                         onChange={e => toggleStop(p, e.target.checked)}
                       />
                       <div className="tr-poi-photo">

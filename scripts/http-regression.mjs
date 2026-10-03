@@ -1,0 +1,123 @@
+// Reproducible HTTP integration check using the same isolated browser fixture.
+// npm run build && node scripts/http-regression.mjs
+// This does not launch a browser or verify rendered UI; no Playwright required.
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { createBrowserFixture, selectedPoi } from './browser-fixture.mjs';
+
+const fixture = await createBrowserFixture();
+const request = (pathname, options = {}) => fetch(`${fixture.origin}${pathname}`, { redirect: 'manual', ...options });
+const checks = [];
+const pass = description => { checks.push(description); console.log(`PASS ${description}`); };
+const topology = day => [day.legs[0]?.from.key, ...day.legs.map(leg => leg.to.key)];
+const expected = ['xining', selectedPoi.key, 'huzhu'];
+
+function assertSelected(trip) {
+  assert.equal(trip.days.length, 2);
+  assert.deepEqual(trip.customStops['1'], expected);
+  assert.deepEqual(topology(trip.days[0]), expected);
+  assert.equal(trip.days[0].legs.length, 2);
+  assert.deepEqual(topology(trip.days[1]), ['huzhu', 'chaka']);
+  assert.equal(trip.customPois[selectedPoi.key].name, selectedPoi.name);
+  assert.equal(trip.customPois[selectedPoi.key].lng, selectedPoi.lng);
+  assert.equal(trip.customPois[selectedPoi.key].lat, selectedPoi.lat);
+}
+
+async function login(password) {
+  return request('/login', {
+    method: 'POST',
+    headers: { Origin: fixture.origin, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ password }),
+  });
+}
+
+async function authenticate() {
+  const response = await login(fixture.password);
+  assert.equal(response.status, 303);
+  assert.equal(response.headers.get('location'), '/');
+  const setCookie = response.headers.get('set-cookie');
+  assert.match(setCookie, /; HttpOnly/i);
+  assert.match(setCookie, /; SameSite=Strict/i);
+  const cookie = setCookie.split(';')[0];
+  const sessionResponse = await request('/api/auth/session', { headers: { Cookie: cookie } });
+  assert.equal(sessionResponse.status, 200);
+  const session = (await sessionResponse.json()).data;
+  assert.match(session.csrfToken, /^[a-f0-9]{64}$/);
+  return {
+    cookie,
+    headers: { Cookie: cookie, Origin: fixture.origin, 'Content-Type': 'application/json', 'X-CSRF-Token': session.csrfToken },
+  };
+}
+
+try {
+  await fixture.start({ seed: true });
+  const index = await readFile(path.join(fixture.dir, 'dist/index.html'), 'utf8');
+  const assets = [...index.matchAll(/(?:src|href)="(\/assets\/[^"?#]+)"/g)].map(match => match[1]);
+  assert.ok(assets.some(asset => asset.endsWith('.js')), 'Run the normal Vite build first');
+  for (const pathname of ['/trips', '/index.html', ...assets]) {
+    const response = await request(pathname);
+    assert.equal(response.status, 303, pathname);
+    assert.equal(response.headers.get('location'), '/login');
+    assert.match(response.headers.get('cache-control'), /no-store/);
+  }
+  for (const pathname of ['/api/health', '/api/settings', '/api/places', '/api/events', '/api/trip', '/api/auth/session']) {
+    assert.equal((await request(pathname)).status, 401, pathname);
+  }
+  pass('anonymous frontend, JS/CSS assets and private APIs are protected');
+
+  const wrong = await login('deliberately-wrong-fixture-password');
+  assert.equal(wrong.status, 401);
+  assert.equal(wrong.headers.get('set-cookie'), null);
+  const originalSession = await authenticate();
+  assert.equal((await request('/trips', { headers: originalSession.headers })).status, 200);
+  pass('incorrect password fails; correct password creates an HttpOnly, SameSite=Strict session');
+
+  const before = await fixture.readTrip();
+  assert.equal(before.days.length, 2);
+  const nearbyResponse = await request('/api/trip/days/1/pois', { headers: originalSession.headers });
+  assert.equal(nearbyResponse.status, 200);
+  const poi = (await nearbyResponse.json()).data.items.find(item => item.key === selectedPoi.key);
+  assert.ok(poi, 'The mock ctrip provider must supply the dynamically selected POI');
+  const added = await request('/api/trip/days/1/stops', {
+    method: 'PUT', headers: originalSession.headers,
+    body: JSON.stringify({ stops: ['xining', poi, 'huzhu'] }),
+  });
+  assert.equal(added.status, 200, await added.clone().text());
+  assertSelected((await added.json()).data);
+  assertSelected(await fixture.readTrip());
+  pass('a provider-shaped ctrip POI is saved with a complete snapshot and connected route topology');
+
+  const saved = await fixture.readTrip();
+  await fixture.stop('SIGKILL');
+  await fixture.start(); // Preserve the exact same directory; never reseed.
+  assert.deepEqual(await fixture.readTrip(), saved);
+  assert.equal((await request('/api/trip', { headers: originalSession.headers })).status, 401);
+  assert.equal((await request('/trips', { headers: originalSession.headers })).headers.get('location'), '/login');
+  pass('hard process restart preserves trip data and invalidates the old session');
+
+  const freshSession = await authenticate();
+  assert.notEqual(freshSession.cookie, originalSession.cookie);
+  const persisted = await request('/api/trip', { headers: freshSession.headers });
+  assert.equal(persisted.status, 200);
+  assertSelected((await persisted.json()).data);
+  const recalculated = await request('/api/trip/days/1/recalc', { method: 'POST', headers: freshSession.headers });
+  assert.equal(recalculated.status, 200, await recalculated.clone().text());
+  assertSelected((await recalculated.json()).data);
+  assertSelected(await fixture.readTrip());
+  pass('reauthentication and recalculation retain the selected POI and both connected route legs');
+
+  const loggedOut = await request('/api/auth/logout', { method: 'POST', headers: freshSession.headers });
+  assert.equal(loggedOut.status, 200);
+  assert.match(loggedOut.headers.get('set-cookie'), /tm_session=;/);
+  assert.equal((await request('/api/trip', { headers: freshSession.headers })).status, 401);
+  assert.equal((await request('/trips', { headers: freshSession.headers })).headers.get('location'), '/login');
+  pass('logout invalidates the session for API and frontend access');
+
+  assert.equal(fixture.output.includes('FORBIDDEN_EXTERNAL_IO'), false, fixture.output);
+  assert.equal(fixture.output.includes('[ERR]'), false, fixture.output);
+  pass('no external network calls, CLI execution, real credentials or user data were used');
+  console.log(JSON.stringify({ passed: checks.length, browserVerified: false }, null, 2));
+} finally {
+  await fixture.dispose();
+}

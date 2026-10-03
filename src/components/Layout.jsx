@@ -1,6 +1,8 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { CalendarClock, MapPin, Plane, Settings, Clock3, CloudRain, CheckCircle2 } from 'lucide-react';
 import { weather, settings } from '../mock/data';
+import { logout } from '../api/client';
+import { useState } from 'react';
 
 /* 冻结的导航项（顺序/图标/路径不得更改） */
 const NAV = [
@@ -20,6 +22,12 @@ const TITLES = [
 
 export default function Layout() {
   const { pathname } = useLocation();
+  const [logoutError, setLogoutError] = useState('');
+  const [loggingOut, setLoggingOut] = useState(false);
+  async function handleLogout() {
+    setLoggingOut(true);
+    try { await logout(); } catch (e) { setLogoutError(e.message); setLoggingOut(false); }
+  }
   const title = TITLES.find((t) => t.match.test(pathname))?.title || '今日路线';
 
   return (
@@ -65,6 +73,8 @@ export default function Layout() {
             <CheckCircle2 size={14} strokeWidth={1.8} />
             <span>飞书已连接</span>
           </div>
+          <button type="button" onClick={handleLogout} disabled={loggingOut}>{loggingOut ? '退出中…' : '退出登录'}</button>
+          {logoutError && <span role="alert">{logoutError}</span>}
           <div className="topbar-avatar">JK</div>
         </header>
         <main className="shell-content">

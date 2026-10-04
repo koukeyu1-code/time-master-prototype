@@ -84,7 +84,10 @@ export function createPersonalAuth(config, { now = Date.now, sessionTtlMs = 8 * 
     return { ...session, key };
   }
   router.use((req, res, next) => {
-    res.set({ 'Cache-Control': 'no-store', 'Pragma': 'no-cache', 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer',
+    // no-referrer turns native form POST Origin into null (Fetch §3.2),
+    // breaking the exact-origin login guard. same-origin still hides referrers
+    // from other origins while keeping both initial and retry forms usable.
+    res.set({ 'Cache-Control': 'no-store', 'Pragma': 'no-cache', 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'same-origin',
       'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'none'; object-src 'none'" });
     if (config.production) res.set('Strict-Transport-Security', 'max-age=31536000');
     const expected = expectedOrigin(req);

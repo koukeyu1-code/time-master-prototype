@@ -92,7 +92,7 @@ function RouteMap({ trip }) {
           ))}
         </div>
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="auto" className="tr-routemap-svg">
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" className="tr-routemap-svg">
         <defs>
           <marker id="route-arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto">
             <path d="M1 1 L7 4 L1 7 Z" />

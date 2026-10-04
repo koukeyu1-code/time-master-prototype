@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createBrowserFixture, selectedPoi, tripName } from './browser-fixture.mjs';
+import { assertNativeLoginResponse } from './browser-login-check.mjs';
 
 const moduleName = process.env.PLAYWRIGHT_MODULE || 'playwright';
 const { chromium } = await import(path.isAbsolute(moduleName) ? pathToFileURL(moduleName).href : moduleName).catch(error => {
@@ -43,13 +44,7 @@ async function submitLogin(password, expectedStatus) {
     page.waitForResponse(response => response.url() === `${fixture.origin}/login` && response.request().method() === 'POST'),
     page.getByRole('button', { name: '登录', exact: true }).click(),
   ]);
-  const headers = await response.request().allHeaders();
-  const diagnostics = `Login POST: status=${response.status()}, Origin=${headers.origin ?? '(missing)'}, Sec-Fetch-Site=${headers['sec-fetch-site'] ?? '(missing)'}`;
-  assert.equal(headers.origin, fixture.origin, diagnostics);
-  assert.equal(headers['sec-fetch-site'], 'same-origin', diagnostics);
-  assert.equal(headers['sec-fetch-mode'], 'navigate', 'Login must use the browser native form navigation');
-  assert.equal(response.status(), expectedStatus, diagnostics);
-  assert.equal(response.headers()['referrer-policy'], 'same-origin');
+  await assertNativeLoginResponse(response, { origin: fixture.origin, expectedStatus });
   return response;
 }
 

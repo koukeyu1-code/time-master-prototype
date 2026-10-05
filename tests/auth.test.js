@@ -66,10 +66,38 @@ test('unauthenticated API, frontend, assets, nested routes and HEAD are protecte
   assert.match(await (await request('/login')).text(), /个人密码/);
 });
 
-test('wrong login, absent/cross-site Origin and forged cookies grant no access', async t => {
-  const { request, login } = await fixture(t);
+test('native login forms retain same-origin referrer policy on initial, failed and throttled responses', async t => {
+  const { request, login } = await fixture(t, { authOptions: { loginLimit: 2 } });
+  for (const [send, status] of [
+    [() => request('/login'), 200],
+    [() => login('wrong fixture'), 401],
+    [() => login('wrong again'), 401],
+    [() => login(), 429],
+  ]) {
+    const response = await send();
+    assert.equal(response.status, status);
+    assert.equal(response.headers.get('set-cookie'), null);
+    // Fetch's Origin-header algorithm sends Origin:null for native form POSTs
+    // under no-referrer. Every page containing the retry form needs this policy.
+    assert.equal(response.headers.get('referrer-policy'), 'same-origin');
+    assert.match(response.headers.get('content-security-policy'), /form-action 'self'/);
+    assert.match(await response.text(), /<form action="\/login" method="post">/);
+  }
+});
+
+test('wrong login, absent/null/cross-site Origin and forged cookies grant no access', async t => {
+  const { origin, request, login } = await fixture(t);
   assert.equal((await login('wrong fixture')).status, 401);
-  assert.equal((await login(password, { Origin: 'https://evil.invalid' })).status, 403);
+  for (const headers of [
+    { Origin: 'null', 'Sec-Fetch-Site': 'same-origin' },
+    { Origin: 'https://evil.invalid' },
+    { Origin: origin, 'Sec-Fetch-Site': 'cross-site' },
+  ]) {
+    const rejected = await login(password, headers);
+    assert.equal(rejected.status, 403);
+    assert.equal(rejected.headers.get('set-cookie'), null);
+    assert.equal((await request('/api/private')).status, 401);
+  }
   assert.equal((await request('/login', { method: 'POST' })).status, 403);
   assert.equal((await request('/api/private', { headers: { Cookie: `tm_session=${'a'.repeat(64)}` } })).status, 401);
   assert.equal((await request('/login', { headers: { Host: 'evil.invalid' } })).status, 403);
@@ -88,7 +116,7 @@ test('login session authorizes reads; mutations require token and exact origin; 
   assert.equal((await request('/api/private', { headers })).status, 200);
   const csrf = (await (await request('/api/auth/session', { headers })).json()).data.csrfToken;
   assert.equal(csrf.length, 64);
-  for (const extra of [{}, { Origin: origin }, { Origin: origin, 'X-CSRF-Token': 'é'.repeat(64) }, { 'X-CSRF-Token': csrf }, { Origin: 'https://evil.invalid', 'X-CSRF-Token': csrf }]) {
+  for (const extra of [{}, { Origin: origin }, { Origin: 'null', 'X-CSRF-Token': csrf, 'Sec-Fetch-Site': 'same-origin' }, { Origin: origin, 'X-CSRF-Token': 'é'.repeat(64) }, { 'X-CSRF-Token': csrf }, { Origin: 'https://evil.invalid', 'X-CSRF-Token': csrf }]) {
     assert.equal((await request('/api/private', { method: 'POST', headers: { ...headers, ...extra } })).status, 403);
   }
   const mutationHeaders = { ...headers, Origin: origin, 'X-CSRF-Token': csrf };

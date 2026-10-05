@@ -114,7 +114,7 @@ npm run build -- --config vite.config.single.js
 npm run test:http
 ```
 
-`test:http` 在构建后启动全新隔离服务，验证实际 HTTP 登录、静态资源/API 拦截、添加景点、强制结束进程并重启、重新登录重算与退出。
+`test:http` 在构建后启动全新隔离服务，验证实际 HTTP 登录、静态资源/API 拦截、添加景点、强制结束进程并重启、重新登录重算与退出。它显式发送 Origin，不能模拟浏览器原生表单的请求头生成。
 
 Node 内置测试覆盖飞书运行时配置及失败路径、真实入口隔离启动、登录/CSRF/会话/限流/生产 fail-closed、原子写入/备份错误/并发更新、动态 POI 跨进程重启与旧数据恢复。所有测试使用临时目录、mock API/CLI、虚构密码，不读写本地真实数据或访问第三方账号。
 
@@ -133,6 +133,10 @@ npm run test:browser
 PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs CHROMIUM_PATH=/absolute/path/to/chromium npm run test:browser
 ```
 
-浏览器回归另需在测试环境提供 Playwright 与 Chromium；可使用 `PLAYWRIGHT_MODULE` 指定现有 Playwright 模块，`CHROMIUM_PATH` 指定 Chromium 可执行文件，不会由脚本自动安装。脚本启动独立的临时 Node 服务、模拟第三方，验证登录、界面添加景点、真正重启后重新登录与重算、退出登录。它不证明实际 HTTPS/代理/持久卷或真实第三方集成可用。
+浏览器回归另需在测试环境提供 Playwright 与 Chromium；可使用 `PLAYWRIGHT_MODULE` 指定现有 Playwright 模块，`CHROMIUM_PATH` 指定 Chromium 可执行文件，不会由脚本自动安装。脚本启动独立的临时 Node 服务、模拟第三方，验证原生表单错误密码后再次登录（检查浏览器实际发送的 Origin，不注入请求头）、界面添加景点、真正重启后重新登录与重算、退出登录。它不证明实际 HTTPS/代理/持久卷或真实第三方集成可用。
+
+登录响应使用 `Referrer-Policy: same-origin`，包括错误密码与限流后的重试表单。旧版 `no-referrer` 会让原生表单 POST 携带 `Origin: null`，导致同源检查返回 403；这属于应用响应头问题，不是 Playwright 安装问题。详见 [Fetch 的 Origin 生成规则](https://fetch.spec.whatwg.org/#append-a-request-origin-header)。修复保留严格 Origin/CSRF 检查，缺失、`null` 或跨站 Origin 仍会被拒绝；`same-origin` 仍不向其他来源发送 Referer。
+
+浏览器脚本的网络拦截会让 Playwright 的 `allHeaders()` 返回暂停请求时的快照，其中可能未暴露 `Sec-Fetch-Site` / `Sec-Fetch-Mode`；这不能证明实际网络请求未发送这些头。脚本使用 `isNavigationRequest()` 判断原生导航，仅在这两个元数据头可见时校验其值；精确 Origin、响应状态和 Referrer-Policy 仍必须通过。Node 单元测试覆盖该观察接口的兼容性，不代表浏览器端到端已通过。
 
 本次受运行环境限制，真实浏览器回归尚未完成：Chromium 创建本地 socket 被系统拒绝，受支持云浏览器也阻止访问测试 loopback 地址。脚本已保留供允许浏览器访问的环境运行；HTTP 接口验证和 Node 跨进程重启验证不能替代浏览器通过结果。

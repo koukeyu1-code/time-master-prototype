@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createBrowserFixture, selectedPoi, tripName } from './browser-fixture.mjs';
+import { assertNativeLoginResponse } from './browser-login-check.mjs';
 
 const moduleName = process.env.PLAYWRIGHT_MODULE || 'playwright';
 const { chromium } = await import(path.isAbsolute(moduleName) ? pathToFileURL(moduleName).href : moduleName).catch(error => {
@@ -33,6 +34,18 @@ async function assertSelectedTrip(trip) {
   assert.deepEqual(topology(trip.days[0]), expectedKeys);
   assert.equal(trip.days[0].legs.length, 2);
   assert.deepEqual(topology(trip.days[1]), ['huzhu', 'chaka']);
+}
+
+// Keep this as a real native form submission: APIRequestContext or forged
+// Origin headers would hide regressions caused by the document's referrer policy.
+async function submitLogin(password, expectedStatus) {
+  await page.getByLabel('个人密码').fill(password);
+  const [response] = await Promise.all([
+    page.waitForResponse(response => response.url() === `${fixture.origin}/login` && response.request().method() === 'POST'),
+    page.getByRole('button', { name: '登录', exact: true }).click(),
+  ]);
+  await assertNativeLoginResponse(response, { origin: fixture.origin, expectedStatus });
+  return response;
 }
 
 try {
@@ -86,24 +99,22 @@ try {
   for (const api of ['/api/health', '/api/settings', '/api/places', '/api/events', '/api/trip', '/api/auth/session']) {
     assert.equal((await context.request.get(api, { maxRedirects: 0 })).status(), 401, `Unauthenticated API: ${api}`);
   }
-  await page.goto('/trips');
+  const loginPage = await page.goto('/trips');
+  assert.equal(loginPage.status(), 200);
+  assert.equal(loginPage.headers()['referrer-policy'], 'same-origin');
   await page.getByLabel('个人密码').waitFor();
   assert.equal(new URL(page.url()).pathname, '/login');
   assert.equal(await page.locator('.shell-nav').count(), 0);
   await page.screenshot({ path: path.join(screenshots, '01-login.png'), fullPage: true });
   pass('anonymous deep links, index, JS/CSS assets and private APIs are protected');
 
-  await page.getByLabel('个人密码').fill('deliberately-wrong-test-password');
-  const rejected = page.waitForResponse(response => response.url() === `${fixture.origin}/login` && response.request().method() === 'POST');
-  await page.getByRole('button', { name: '登录', exact: true }).click();
-  assert.equal((await rejected).status(), 401);
+  await submitLogin('deliberately-wrong-test-password', 401);
   await page.getByRole('alert').waitFor();
   assert.equal((await context.request.get('/api/trip')).status(), 401);
   pass('wrong password is rejected and does not create an authenticated session');
 
   async function login() {
-    await page.getByLabel('个人密码').fill(fixture.password);
-    await page.getByRole('button', { name: '登录', exact: true }).click();
+    await submitLogin(fixture.password, 303);
     await page.waitForURL(`${fixture.origin}/`);
     await page.waitForLoadState('networkidle');
     await page.getByRole('button', { name: '退出登录', exact: true }).waitFor();
